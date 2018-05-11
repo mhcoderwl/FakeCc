@@ -1,0 +1,1197 @@
+/**
+ * JavaCC template file created by SF JavaCC plugin 1.5.28+ wizard for JavaCC 1.5.0+
+ */options {
+    STATIC = false;
+    DEBUG_PARSER = true;
+    UNICODE_INPUT = true;
+    JDK_VERSION = "1.7";
+}
+//JAVACC解析语法规则,下面的类是解析器的类,再下面是扫描器,用来生成token序列,接下来是解析器的语法定义.
+PARSER_BEGIN(Parser)
+package parser;
+import ast.*;
+import entity.*;
+import type.*;
+import asm.Label;
+import utils.ErrorHandler;
+import exception.*;
+import java.lang.reflect.*;
+import java.util.*;
+import java.io.*;
+
+public class Parser{
+	private String sourceName;//解析的文件名
+	private Set<String> knownTypedefs;//用户声明的类型
+	private LibraryLoader loader;//用来加载import文件的类
+	private ErrorHandler errorHandler;
+	 static final public String SOURCE_ENCODING = "UTF-8";//源文件的编码格式
+	protected Location location(Token t){
+		return new Location(sourceName,t);
+	}
+	//构造函数
+	public Parser(Reader s,String filename,LibraryLoader loader,ErrorHandler errorHandler,boolean debug) {
+	  this(s);
+	  this.loader=loader;
+	  this.errorHandler=errorHandler;
+	  this.sourceName=filename;
+	  this.knownTypedefs=new HashSet<String >();
+	  if(debug) {
+	    enable_tracing();//启动跟踪功能
+	  }else {
+	    disable_tracing();
+	  }
+	}
+	//解析一个指定声明文件的调用
+	static public Declarations parseDeclFile(File file,
+                                             LibraryLoader loader,
+                                             ErrorHandler errorHandler)
+                                             throws SyntaxException,
+                                                    FileException {
+        return parseDeclFile(file, loader, errorHandler, false);
+    }
+
+    static public Declarations parseDeclFile(File file,
+                                             LibraryLoader loader,
+                                             ErrorHandler errorHandler,
+                                             boolean debug)
+                                             throws SyntaxException,
+                                                    FileException {
+        return newFileParser(file, loader, errorHandler, debug).parseDecls();
+    }
+	//用来解析当前文件为声明文件的调用,返回一个Declarations对象
+	 public Declarations parseDecls() throws SyntaxException {
+        try {
+            return declaration_file();
+        }
+        catch (TokenMgrError ex) {
+            throw new SyntaxException(ex.getMessage());
+        }
+        catch (ParseException ex) {
+            throw new SyntaxException(ex.getMessage());
+        }
+    }
+    //用来解析当前文件是源文件的调用,返回一个AST对象
+    public AST parse() throws SyntaxException {
+        try {
+            return compilation_unit();
+        }
+        catch (TokenMgrError err) {
+            throw new SyntaxException(err.getMessage());
+        }
+        catch (ParseException ex) {
+            throw new SyntaxException(ex.getMessage());
+        }
+        
+    }
+    //解析一个指定源文件的调用
+     static public AST parseFile(File file, LibraryLoader loader,
+                                ErrorHandler errorHandler)
+                                throws SyntaxException, FileException {
+        return parseFile(file, loader, errorHandler, false);
+    }
+
+    // #@@range/parseFile{
+    static public AST parseFile(File file, LibraryLoader loader,
+                                ErrorHandler errorHandler, boolean debug)
+                                throws SyntaxException, FileException {
+        return newFileParser(file, loader, errorHandler, debug).parse();
+    }
+
+    //创建一个Parser类
+     static public Parser newFileParser(String name,
+                                       LibraryLoader loader,
+                                       ErrorHandler errorHandler,
+                                       boolean debug)
+                                       throws FileException {
+                             return newFileParser(new File(name),loader,errorHandler,debug);
+                           }
+    
+     static public Parser newFileParser(File file,
+                                       LibraryLoader loader,
+                                       ErrorHandler errorHandler,
+                                       boolean debug)
+                                       throws FileException {
+        try {
+            BufferedReader r =
+                new BufferedReader(new FileReader(file));
+            return new Parser(r, file.getPath(), loader, errorHandler, debug);
+        }
+        catch (FileNotFoundException ex) {
+            throw new FileException(ex.getMessage());
+        }
+       
+    }
+   
+	//将声明的类型添加到用来存储的set中.
+	private void addKnownTypedefs(List<TypedefNode> typedefs) {
+        for (TypedefNode n : typedefs) {
+            addType(n.name());
+        }
+    }
+	private boolean isType(String name) {
+        return knownTypedefs.contains(name);
+    }
+    private void addType(String name) {
+        knownTypedefs.add(name);
+    }
+	//解析代码中数值的文本image,并用适当的参数生成IntegerLiteralNode,一个整数有四种,uint,int,ulong,long
+	IntegerLiteralNode integerNode(Location loc,String image){
+		long i=integerValue(image);
+        if (image.endsWith("UL")) {
+            return new IntegerLiteralNode(loc, IntegerTypeRef.ulongRef(), i);
+        }
+        else if (image.endsWith("L")) {
+            return new IntegerLiteralNode(loc, IntegerTypeRef.longRef(), i);
+        }
+        else if (image.endsWith("U")) {
+            return new IntegerLiteralNode(loc, IntegerTypeRef.uintRef(), i);
+        }
+        else {
+            return new IntegerLiteralNode(loc, IntegerTypeRef.intRef(), i);
+        }
+	}
+	//
+	 private TypeRef size_t() {
+        return IntegerTypeRef.ulongRef();
+    }
+	//将一个整数的字面值转换为一个long类型,可能有8进制或16进制
+	private long integerValue(String image){
+		String s=image.replaceFirst("[UL]","");//去除ul标志
+		if(s.startsWith("0")&&!s.equals("0")){
+			return Long.parseLong(s.substring(1),8);
+		}else if(s.startsWith("0x")||s.startsWith("0X")){
+			return Long.parseLong(s.substring(2),16);
+		}else{
+			return Long.parseLong(s,10);
+		}
+	}
+	//字符串字面值转成一个字符串对象(这段可用正则表达式改写)
+	String stringValue(String _image)throws ParseException{
+		 //首先去除首尾的"
+		 String image= _image.substring(1,_image.length()-1);
+		 int pos=0;
+		 int idx=0;
+		 StringBuilder buff=new StringBuilder();
+		 //判断有转义字符的情况
+		 while((idx=image.indexOf("//"))>=0){
+		 	buff.append(image.substring(pos,idx));
+		 	if((image.length()>=idx+4)
+		 		&& Character.isDigit(image.charAt(idx+1))
+		 		&& Character.isDigit(image.charAt(idx+2))
+		 		&& Character.isDigit(image.charAt(idx+3))) { 
+		 		buff.append(unescapeOctal(image.substring(idx+1,idx+4)));
+		 		pos=idx+4;
+		 	}
+		 	else{
+		 		buff.append(unescapeSeq(image.charAt(idx+1)));
+		 		pos=idx+2;
+		 	}
+		 }
+		if(pos<image.length())
+			buff.append(image.substring(pos));
+	 	return buff.toString();
+	}
+	//转义数值转成char
+	private char unescapeOctal(String digits)throws ParseException{
+		final int CHARMAX=255;
+		int i=Integer.parseInt(digits,8);
+		if(i>CHARMAX){
+			throw new ParseException("octal character sequence too big :" +digits);
+		}
+		return (char)i;
+	}
+	//转移字符转成char
+	private final char bell=7;
+	private final char backspace='\b';
+	private final char escape=27;
+	private final char vt=11;
+	private char unescapeSeq(char c)throws ParseException{
+	  switch(c) { 
+		case '0': return '\0';
+        case '"': return '"';
+        case '\'': return '\'';
+        case 'a': return bell;
+        case 'b': return backspace;
+        case 'e': return escape;
+        case 'f': return '\f';
+        case 'n': return '\n';
+        case 'r': return '\r';
+        case 't': return '\t';
+        case 'v': return vt;
+        default:
+            throw new ParseException("unknown escape sequence: \"\\" + c);
+          }
+    }
+	//字符字面量转成字符的数值
+	private long characterCode(String image)throws ParseException{
+		String str=stringValue(image);
+		if(str.length()!=1){
+			throw new Error("character length not equal 1");
+		}
+		return (long)str.charAt(0);
+	}
+}
+PARSER_END(Parser)	
+/*
+	下面是词法描述
+*/
+
+//换行,制表等符号
+SPECIAL_TOKEN: { <SPACES: ([" ", "\t", "\n", "\r", "\f"])+> }
+
+//块注释:/* */
+MORE: { <"/*"> : IN_BLOCK_COMMENT }
+<IN_BLOCK_COMMENT> MORE: { <~[]> }
+<IN_BLOCK_COMMENT> SPECIAL_TOKEN: { <BLOCK_COMMENT: "*/"> : DEFAULT }
+
+
+// 行注释://
+SPECIAL_TOKEN: {
+    <LINE_COMMENT: "//" (~["\n", "\r"])* ("\n" | "\r\n" | "\r")?>// 
+}
+
+
+//保留字
+TOKEN: {
+      <VOID     : "void">
+    | <CHAR     : "char">
+    | <SHORT    : "short">
+    | <INT      : "int">
+    | <LONG     : "long">
+    | < BOOLEAN : "boolean" >
+    | < TRUE  : "true" >
+    | < FALSE  : "false" >
+    | <STRUCT   : "struct">
+    | <UNION    : "union">
+    | <ENUM     : "enum">
+    | <STATIC   : "static">
+    | <EXTERN   : "extern">
+    | <CONST    : "const">
+    | <SIGNED   : "signed">
+    | <UNSIGNED : "unsigned">
+    | <IF       : "if">
+    | <ELSE     : "else">
+    | <SWITCH   : "switch">
+    | <CASE     : "case">
+    | <DEFAULT_ : "default">
+    | <WHILE    : "while">
+    | <DO       : "do">
+    | <FOR      : "for">
+    | <RETURN   : "return">
+    | <BREAK    : "break">
+    | <CONTINUE : "continue">
+    | <GOTO     : "goto">
+    | <TYPEDEF  : "typedef">
+    | <IMPORT   : "import">
+    | <SIZEOF   : "sizeof">
+}
+//标示符
+TOKEN: {
+    <IDENTIFIER: ["a"-"z", "A"-"Z", "_"] (["a"-"z", "A"-"Z", "_", "0"-"9"])*>
+}
+//数字
+TOKEN: {
+    <INTEGER: ["1"-"9"] (["0"-"9"])* ("U")? ("L")?
+            | "0" ["x", "X"] (["0"-"9", "a"-"f", "A"-"F"])+ ("U")? ("L")?
+            | "0" (["0"-"7"])* ("U")? ("L")?
+            >
+}
+
+//字符面量
+MORE: { <"'"> : IN_CHARACTER }                         // rule1
+<IN_CHARACTER> MORE: {
+      <~["'", "\\", "\n", "\r"]> : CHARACTER_TERM      // rule2
+    | <"\\" (["0"-"7"]){3}>      : CHARACTER_TERM      // rule3
+    | <"\\" ~[]>                 : CHARACTER_TERM      // rule4
+}
+<CHARACTER_TERM> TOKEN: { <CHARACTER: "'"> : DEFAULT } // rule5
+
+//字符串面量
+MORE: { <"\""> : IN_STRING }                           // rule1
+<IN_STRING> MORE: {
+      <(~["\"", "\\", "\n", "\r"])+>                   // rule2
+    | <"\\" (["0"-"7"]){3}>                            // rule3
+    | <"\\" ~[]>                                       // rule4
+}
+<IN_STRING> TOKEN: { <STRING: "\""> : DEFAULT }        // rule5
+
+/*
+下面是语法描述
+*/
+//一个编译单位,即一个文件的总体规则,import语句+函数或类型定义+文件结尾
+AST compilation_unit():
+{
+	Token t;
+	Declarations impdecls,decls;
+}
+{
+	{
+		t=getToken(1);//这个方法是JavaCC预定义在Parser类中的方法,可以得到一个token
+	}
+	impdecls=import_stmts() decls=top_defs() <EOF>
+		{
+			decls.add(impdecls); //两者先和并.
+			return new AST(location(t),decls);
+		}
+}
+//多个import行,每个行用loader加载器加载得到一个Declarations,然后用impdecls合并所有的import.
+Declarations import_stmts():
+{
+	Declarations impdecls=new Declarations();
+	String libid=null;
+}
+{
+	(libid=import_stmt()
+		{
+			try{
+					Declarations decls=loader.loadLibrary(libid,errorHandler);
+					if(decls!=null){
+						impdecls.add(decls);
+						addKnownTypedefs(decls.typedefs());
+					}
+				}catch(CompileException e){
+					throw new ParseException(e.getMessage());
+				}
+	}		
+	)* { return impdecls; }
+}
+//一个import行的语法
+String import_stmt():
+{
+	StringBuilder name=new StringBuilder();
+	String s;
+}
+{
+	<IMPORT> s=name(){ name.append(s);} 
+	( "." s=name(){name.append("."+s);} )* ";"
+		{
+			return name.toString();
+		}
+}
+
+//解析声明文件的语法
+Declarations declaration_file():
+{
+    Declarations impdecls, decls = new Declarations();
+    UndefinedFunction funcdecl;
+    UndefinedVariable vardecl;
+    Constant defconst;
+    StructNode defstruct;
+    UnionNode defunion;
+    TypedefNode typedef;
+}
+{
+    impdecls=import_stmts()
+        {
+            decls.add(impdecls);
+        }
+    ( LOOKAHEAD(<EXTERN> typeref() <IDENTIFIER> "(")
+      funcdecl=funcdecl()   { decls.addFuncdecl(funcdecl); }
+    | vardecl=vardecl()     { decls.addVardecl(vardecl); }
+    | defconst=defconst()   { decls.addConstant(defconst); }
+    | defstruct=defstruct() { decls.addDefstruct(defstruct); }
+    | defunion=defunion()   { decls.addDefunion(defunion); }
+    | typedef=typedef()     { decls.addTypedef(typedef); }
+    )*
+    <EOF>
+        {
+            return decls;
+        }
+}
+//import中声明的语法
+//声明的函数
+UndefinedFunction funcdecl():
+{
+  TypeRef tr;
+  String name;
+  Params params;
+}
+{
+  tr=typeref() name=name()params=params()
+  	{
+  	  	FunctionTypeRef t=new FunctionTypeRef(tr,params.paramsTypeRef());
+  		return new UndefinedFunction(new TypeNode(t),name,params);  
+  	}
+}
+//声明的变量
+UndefinedVariable vardecl():
+{
+	TypeRef tr;
+	String name;
+}
+{
+  < EXTERN > tr=typeref() name=name()
+  	{
+  	  return	new UndefinedVariable(new TypeNode(tr),name);
+  	}
+ }
+
+//与<INDENTIFIER>等价
+ String name():
+ {
+ 	Token t;
+ }
+{
+	t=<IDENTIFIER>
+		{
+			return t.image;
+		}
+}
+
+//定义的语法规则,这里函数定义和变量定义必须超前扫描到形参列表的左括号出现才能确定.结构体和变量也需要读到第3个字符才能区分
+//这个Declarations类是用来保存所有定义的类型的类,传给AST类当参数构建根节点.
+Declarations top_defs():
+{
+	Declarations decls=new Declarations();
+	DefinedFunction defun;
+	List<DefinedVariable> defvars;
+	Constant defconst;
+	StructNode	defstruct;
+	UnionNode defunion;
+	TypedefNode deftype;
+}
+{
+	(LOOKAHEAD(storage() typeref() <IDENTIFIER> "(")
+	defun=defun()//函数定义
+		{decls.addDefun(defun);}
+	| LOOKAHEAD(3) defvars=defvars()//变量定义
+		{decls.addDefvars(defvars); }
+	| defconst=defconst()//常量定义
+		{decls.addConstant(defconst);}
+	| defstruct=defstruct()//结构体定义
+		{decls.addDefstruct(defstruct);}
+	| defunion=defunion()//联合体定义
+		{decls.addDefunion(defunion);}
+	| deftype=typedef()//类型别名
+		{decls.addTypedef(deftype);}
+	)*
+		{
+			return decls;
+		}
+}
+boolean storage():
+{
+	Token t=null;
+}
+{
+	[t=<STATIC>]{return (t==null?false:true);}
+}
+DefinedFunction defun():
+{
+	boolean priv;
+	TypeRef ret;
+	String name;
+	Params pl;
+	BlockNode body;
+}
+{
+	priv=storage() ret=typeref() name=name()"("pl=params() ")" body=block()
+		{
+			TypeRef t=new FunctionTypeRef(ret,pl.paramsTypeRef());
+			return new DefinedFunction(priv,new TypeNode(t),name,pl,body); 
+		}
+}
+//priv变量用来判断是否是静态类型.	
+List<DefinedVariable> defvars():
+{
+	List<DefinedVariable> defs= new ArrayList<DefinedVariable>();
+	boolean priv;
+	TypeNode type;
+	String name;
+	ExprNode init=null;
+}
+{
+	priv=storage() type=type() name=name() ["=" init=expr()]
+		{
+			defs.add(new DefinedVariable(priv,type,name,init));
+			init=null;	//这里每次init可能没有被跟新,所以要手动赋为null.
+		}
+							("," name=name() ["=" init=expr()]
+								{
+									defs.add(new DefinedVariable(priv,type,name,init));
+									init=null;
+								}
+							)* ";"
+			{
+				return defs;
+			}
+}
+Constant defconst():
+{
+	TypeNode type;
+	String name;
+	ExprNode value;
+}
+{
+	<CONST> type=type() name=name() "=" value=expr() ";"
+		{
+			return new Constant(type,name,value);
+		}
+}
+//函数形参
+Params params():
+{
+	Params p;
+	Token t;
+}
+{
+	LOOKAHEAD(<VOID> ")") t=<VOID>//区分返回值为void类型的指针
+		{
+			return new Params(location(t),new ArrayList<Parameter>());
+		}
+	| p=fixedparams()
+		["," "..." {p.acceptVarargs();} ]//可变长参数,调用这个方法改变这个参数实例的状态
+	{
+		return p;
+	}
+}
+//定长参数,有若干个参数构成
+Params fixedparams():
+{
+	List<Parameter> lp=new ArrayList<Parameter>();
+	Parameter p1,p;
+}
+{
+	p1=param() {lp.add(p1);}
+	(LOOKAHEAD(2) "," p=param()
+		{
+			lp.add(p);
+		}
+	)*//这里前看为了区分可变长参数,...
+		{
+			return new Params(p1.location(),lp);
+		}
+}
+//一个参数语法
+Parameter param():
+{
+	TypeNode type;
+	String name;
+}
+ {
+ 	type=type() name=name()
+ 		{
+ 			return new Parameter(type,name);
+ 		}
+ }
+ //函数主体语法格式,变量定义列表+若干语句
+ BlockNode block():
+ {
+ 	Token t;
+ 	List<StmtNode> ls;
+ 	List<DefinedVariable> vars;
+ }
+ {
+ 	t="{" vars=defvar_list() ls=stmts() "}"
+ 		{
+ 			return new BlockNode(location(t),vars,ls);
+ 		}
+ }
+ //函数开头的定义变量列表
+ List<DefinedVariable> defvar_list():
+ {
+ 	List<DefinedVariable> list=new ArrayList<DefinedVariable>();
+ 	List<DefinedVariable> vars;
+ }
+ {
+ 	(vars=defvars(){list.addAll(vars);})*
+ 		{
+ 			return list;
+ 		}
+ }
+ //结构体定义,只能含有定义的变量.没有方法.
+StructNode defstruct():
+{
+	Token t;
+	String name;
+	List<Slot> meml=new ArrayList<Slot>();
+}
+{
+	t=<STRUCT> name=name()  meml=member_list() ";"
+		{
+			return new StructNode(location(t),name,new StructTypeRef(name),meml);
+		}
+}
+UnionNode defunion():
+{
+	Token t;
+	String name;
+	List<Slot> meml=new ArrayList<Slot>();
+}
+{
+	t=<UNION> name=name()  meml=member_list() ";"
+		{
+			return new UnionNode(location(t),name,new UnionTypeRef(name),meml);
+		}
+}
+//结构体变量列表,单位一个槽
+List<Slot> member_list():
+{
+	Slot st;
+	List<Slot> l=new ArrayList<Slot >();
+}
+{
+	"{" (st=slot() ";"{l.add(st);})* "}"
+		{
+			return l;
+		}
+}
+//Slot 的实质语法和函数参数的语法相同.
+Slot slot():
+{
+	TypeNode type;
+	String name;
+}
+{
+	type=type() name=name(){return new Slot(type,name);}
+}
+
+TypedefNode typedef():
+{
+	Token t;
+	TypeRef tr;
+	Token newname;
+}
+{
+	t=<TYPEDEF> tr=typeref() newname=< IDENTIFIER > ";"
+		{
+			addType(newname.image);			//因为新加入了类型
+			return new TypedefNode(location(t),tr,newname.image);
+		}
+}
+//一个类型
+TypeNode type():
+{
+	TypeRef tr;
+}
+{
+	tr=typeref()
+		{
+			return new TypeNode(tr);
+		}
+}
+//变量类型加ref的表示只是声明
+TypeRef typeref():
+{
+	TypeRef tr;
+	Token t;
+	ParamTypeRefs params;
+}
+{
+	tr=typeref_base()
+	(LOOKAHEAD(2) "[" "]"
+	| "[" t=<INTEGER> "]"	//数组类型
+		{
+			 tr=new ArrayTypeRef(tr,integerValue(t.image));	//递归解析
+		}
+	| "*"		//指针类型
+		{
+			 tr=new PointerTypeRef(tr);
+	}
+	| "(" params=param_typerefs() ")"	//函数指针
+		{
+			tr=new	FunctionTypeRef(tr,params);
+	}
+	)* { return tr; }
+}
+//基本类型的语法
+TypeRef typeref_base():
+{
+	Token t,name;
+}
+{
+	  t=<VOID>          { return new VoidTypeRef(location(t)); }
+    | t=<CHAR>          { return IntegerTypeRef.charRef(location(t)); }
+    | t=<SHORT>         { return IntegerTypeRef.shortRef(location(t)); }
+    | t=<INT>           { return IntegerTypeRef.intRef(location(t)); }
+    | t=<LONG>          { return IntegerTypeRef.longRef(location(t)); }
+    | t=< BOOLEAN > {  return IntegerTypeRef.uintRef(location(t)); }
+	| LOOKAHEAD(2) t=<UNSIGNED> <INT>		{ return IntegerTypeRef.uintRef(location(t)); }
+	| LOOKAHEAD(2) t=<UNSIGNED> <SHORT>		 { return IntegerTypeRef.ushortRef(location(t)); }
+	| LOOKAHEAD(2)t=<UNSIGNED> <LONG>	{ return IntegerTypeRef.ulongRef(location(t)); }
+	|t=<UNSIGNED><CHAR>		{ return IntegerTypeRef.ucharRef(location(t)); }
+	|t=<UNION> name=<IDENTIFIER>		{ return new UnionTypeRef(location(t), name.image); }
+	| t=<STRUCT> name=<IDENTIFIER>		{ return new StructTypeRef(location(t), name.image); }
+	//函数指针的类型属于用户自己定义的函数类型,所以用UserTypeRef
+	| LOOKAHEAD({isType(getToken(1).image)})name=<IDENTIFIER>//防止强制转换和函数指针函数调用的冲突
+		{ return new UserTypeRef(location(name), name.image); }
+}
+//函数指针版本的参数类型,只有类型没有名字
+ParamTypeRefs param_typerefs():
+{
+	ParamTypeRefs params;
+	Token t;
+}
+{
+	LOOKAHEAD(<VOID> ")") t=<VOID>//区分返回值为void类型的指针
+		{
+			return new ParamTypeRefs(new ArrayList<TypeRef>());
+	}
+	| params=fixedparam_typerefs() ["," "..."{params.acceptVarargs();}]//可变长参数
+		{
+			return params;
+		}
+}
+ParamTypeRefs fixedparam_typerefs():
+{
+	List<TypeRef> lt=new ArrayList<TypeRef >();
+	TypeRef tr;
+}
+{
+	tr=typeref() {lt.add(tr);}
+	(LOOKAHEAD(2) "," tr=typeref()
+		{
+			lt.add(tr);
+		}
+	)*{return new ParamTypeRefs(lt);}
+}
+//语句语法
+List<StmtNode> stmts():
+{
+	StmtNode s;
+	List<StmtNode> l=new ArrayList<StmtNode>();
+}
+{
+	(s=stmt() {l.add(s);})*
+		{
+			return l;
+		}
+}
+StmtNode stmt():
+{
+  StmtNode sn=null;
+  ExprNode en=null;
+ }
+{
+	(	  ";"//空语句
+	| LOOKAHEAD(2) sn=labeled_stmt()//带有goto标签的语句
+	|en=expr() ";" { sn=new ExprStmtNode(en.location(),en); }
+	| sn=block()//程序块,用大括号括起来的
+	| sn=if_stmt()
+	| sn=while_stmt()
+	| sn=for_stmt()
+	| sn=dowhile_stmt()
+	| sn=switch_stmt()
+	| sn=break_stmt()
+	| sn=continue_stmt()
+	| sn=goto_stmt()
+	|sn=return_stmt()
+)
+	{
+	  return sn;
+	}
+}
+//if语句
+IfNode if_stmt():
+{
+	Token t;
+	ExprNode en;
+	StmtNode thenBody;
+	StmtNode elseBody=null;
+}
+{
+	t=<IF> "(" en=expr() ")" thenBody=stmt() [ LOOKAHEAD(1) <ELSE> elseBody=stmt()]
+		{
+			return new IfNode(location(t),en,thenBody,elseBody);
+		} 
+}
+//while语句
+WhileNode while_stmt():
+{
+	Token t;
+	ExprNode cond;
+	StmtNode body;
+}
+{
+	t=<WHILE> "(" cond=expr() ")" body=stmt()
+		{
+			return new WhileNode(location(t),cond,body);
+		}
+}
+//dowhile语句
+DoWhileNode dowhile_stmt():
+{
+	Token f;
+	ExprNode cond;
+	StmtNode body;
+}
+{
+	f=<DO> body=stmt() <WHILE> "(" cond=expr() ")" ";"
+		{
+			return new DoWhileNode(location(f),cond,body);
+		}
+}
+//for语句
+ForNode for_stmt():
+{
+	Token t;
+	ExprNode e1,e2,e3;
+	StmtNode sn;
+}
+{
+	t=<FOR> "("e1=expr() ";" e2=expr() ";" e3=expr() ")" sn=stmt()
+		{
+			return new ForNode(location(t),e1,e2,e3,sn);
+		}
+}
+//continue语句
+ContinueNode continue_stmt():
+{
+	Token t;
+}
+{
+	t=<CONTINUE> ";"
+	{
+		return new ContinueNode(location(t));
+	}
+}
+//return 语句
+ReturnNode return_stmt():
+{
+	ExprNode expr=null;
+	Token t;
+  }
+{
+	LOOKAHEAD(2) t=<RETURN> ";"
+	| t=<RETURN> expr=expr() ";"
+	{
+	  return new ReturnNode(location(t),expr);
+	}
+}
+//break语句
+BreakNode break_stmt():
+{
+	Token t;
+}
+{
+	t=<BREAK> ";"
+	{
+		return new BreakNode(location(t));
+	}
+}
+// goto语句
+GotoNode goto_stmt():
+{
+	Token t1,t2;
+	
+}
+{
+	t1=<GOTO> t2=<IDENTIFIER> ";"
+		{
+			return new GotoNode(location(t1),t2.image);
+	}
+}
+LabelNode labeled_stmt():
+{
+	Token t;
+	StmtNode sn;
+}
+{
+	t=<IDENTIFIER> ":" sn=stmt()
+		{
+			return new LabelNode(location(t),t.image,sn);
+		}
+	}
+//switch语法,分为一个switch语句,加上多条case,一个case是多个表达式条件加上要执行的block.
+SwitchNode switch_stmt():
+{
+	Token t;
+	ExprNode exp;
+	List<CaseNode > cases;
+}
+{
+	t=<SWITCH> "(" exp=expr() ")" "{" cases=case_clauses() "}"
+	{
+	  return new SwitchNode(location(t),exp,cases);
+	}
+}
+List<CaseNode > case_clauses():
+{
+	List<CaseNode >cases=new ArrayList<CaseNode >();
+	CaseNode  cas;
+  }
+{
+	(cas=case_clause() {cases.add(cas); } )* cas=default_clause() { cases.add(cas); }
+	{
+	  return cases;
+}
+}
+CaseNode case_clause():
+{
+	List<ExprNode >cases;
+	BlockNode body;
+  }
+{
+	cases=cases() body=case_body()
+		{
+		  return new CaseNode(body.location(),cases,body);
+		}
+}
+List<ExprNode > cases():
+{
+	ExprNode n;
+	List<ExprNode > cases=new ArrayList<ExprNode >();
+}
+{
+	(<CASE> n=primary() ":"
+		{
+			cases.add(n);
+	}
+	)+//可以多个case对应同一段代码
+	{
+	  return cases;
+	}
+}
+
+CaseNode default_clause():
+{
+	BlockNode body;
+  }
+{
+	<DEFAULT_> ":" body=case_body()
+		{
+			return new CaseNode(body.location(),new ArrayList<ExprNode >(),body);
+	}
+}
+//每个case下的代码是一个block,而且结尾必须带break.
+BlockNode case_body():
+{
+	List<StmtNode> l=new ArrayList<StmtNode>();
+	StmtNode n;
+}
+{
+	(n=stmt() {if(n!=null)l.add(n);})+	
+		{
+			if(!(l.get(l.size()-1) instanceof BreakNode)){
+				throw new ParseException("missing break statememt");
+			}
+			return new BlockNode(l.get(0).location(),new ArrayList<DefinedVariable>(),l);
+		}
+}
+//最小的符号
+ExprNode primary():
+{
+	Token t;
+	ExprNode exp;
+}
+{
+	 t=<INTEGER>{return integerNode(location(t),t.image);}
+	| t=< FALSE > { return integerNode(location(t),"1") ;}
+	| t=< TRUE > { return integerNode(location(t),"0") ;}
+	| t=<CHARACTER>{return new IntegerLiteralNode(location(t),IntegerTypeRef.charRef(),characterCode(t.image));}
+	| t=<STRING>{return new StringLiteralNode(location(t),
+			new PointerTypeRef(IntegerTypeRef.charRef()),stringValue(t.image));}
+	| t=<IDENTIFIER> {return new VariableNode(location(t),t.image) ; }
+	| "(" exp=expr() ")"{return exp;}
+}
+//expr+0-9数字表示优先级不同的表达式,数字越低优先级越高
+ExprNode expr():
+{
+	ExprNode l;
+	ExprNode r;
+	ExprNode expr;
+	String op;
+}
+{
+	LOOKAHEAD(term() "=")
+	l=term() "=" r=expr()           //赋值表达语句
+		{return new AssignNode(l,r);}
+ 	| LOOKAHEAD(term() opassign_op()) 
+		l=term() op=opassign_op() r=expr()     //自我赋值表达语句
+		{return new OpAssignNode(l,r,op);}
+	| expr=expr10(){return expr;}
+}
+//自我赋值运算符语法
+String opassign_op():
+{}
+{
+	   "+=" {return "+=";}
+	| "-="{return "-=";}
+	| "*="{return "*=";}
+	| "/="{return "/=";}
+	| "%="{return "%=";}
+	| "&="{return "&=";}
+	| "|="{return "|=";}
+	| "^="{return "^=";}
+	| "<<="{return "<<=";}
+	| ">>="{return ">>=";}
+}
+//一系列优先级表达式,优先级低的只能包含比他高的或相同优先级的表达式.从上而下的分割
+//条件运算符
+ExprNode expr10():
+{
+	ExprNode n,t,e;
+	
+}																																																																																		
+{
+	n=expr9() ["?" t=expr10() ":" e=expr10(){return new CondExprNode(n,t,e);}]
+		{return n;}
+}
+//下面都是二元运算符,优先级参考优先级表
+ExprNode expr9():
+{ ExprNode l, r; }
+{
+    l=expr8() ("||" r=expr8() { l = new BinaryOpNode(l,"||", r); })*
+        {
+            return l;
+        }
+}
+
+ExprNode expr8():
+{ ExprNode l, r; }
+{
+    l=expr7() ("&&" r=expr7() { l = new BinaryOpNode(l,"&&",r); })*
+        {
+            return l;
+        }
+}
+ExprNode expr7():
+{ ExprNode l, r; }
+{
+    l=expr6() ( ">"  r=expr6() { l = new BinaryOpNode(l, ">", r); }
+              | "<"  r=expr6() { l = new BinaryOpNode(l, "<", r); }
+              | ">=" r=expr6() { l = new BinaryOpNode(l, ">=", r); }
+              | "<=" r=expr6() { l = new BinaryOpNode(l, "<=", r); }
+              | "==" r=expr6() { l = new BinaryOpNode(l, "==", r); }
+              | "!=" r=expr6() { l = new BinaryOpNode(l, "!=", r); } )*
+        {
+            return l;
+        }
+}
+
+ExprNode expr6():
+{ ExprNode l, r; }
+{
+    l=expr5() ("|" r=expr5() { l = new BinaryOpNode(l, "|", r); })*
+        {
+            return l;
+        }
+}
+
+ExprNode expr5():
+{ ExprNode l, r; }
+{
+    l=expr4() ("^" r=expr4() { l = new BinaryOpNode(l, "^", r); })*
+        {
+            return l;
+        }
+}
+
+ExprNode expr4():
+{ ExprNode l, r; }
+{
+    l=expr3() ("&" r=expr3() { l = new BinaryOpNode(l, "&", r); })*
+        {
+            return l;
+        }
+}
+
+
+
+ExprNode expr3():
+{ ExprNode l, r; }
+{
+    l=expr2() ( ">>" r=expr2() { l = new BinaryOpNode(l, ">>", r); }
+              | "<<" r=expr2() { l = new BinaryOpNode(l, "<<", r); }
+              )*
+        {
+            return l;
+        }
+}
+
+
+
+ExprNode expr2():
+{ ExprNode l, r; }
+{
+    l=expr1() ( "+" r=expr1() { l = new BinaryOpNode(l, "+", r); }
+              | "-" r=expr1() { l = new BinaryOpNode(l, "-", r); }
+              )*
+        {
+            return l;
+        }
+}
+
+
+
+ExprNode expr1():
+{ ExprNode l, r; }
+{
+    l=term() ( "*" r=term() { l = new BinaryOpNode(l, "*", r); }
+             | "/" r=term() { l = new BinaryOpNode(l, "/", r); }
+             | "%" r=term() { l = new BinaryOpNode(l, "%", r); }
+             )*
+        {
+            return l;
+        }
+}
+
+//项的语法
+ExprNode term():
+{
+	TypeNode t;
+	ExprNode n;
+}
+{
+	LOOKAHEAD("(" type()) "(" t=type() ")" n=term()     //带强制类型转换的情况
+		{return new CastNode(t,n);}
+	| n=unary()   {return n;}
+}
+//带运算符的项语法,分为前置和后置
+ExprNode unary():
+{
+	ExprNode n;
+	TypeNode t;
+}
+{
+	"++" n=term(){return new PrefixOpNode("++",n);}
+	| "--"n=term(){return new PrefixOpNode("--",n);}
+	| "-" n=term(){return new UnaryOpNode("-",n);}
+	| "+" n=term(){return new UnaryOpNode("+",n);}
+	| "~" n=term(){return new UnaryOpNode("~",n);}
+	| "!" n=term(){return new UnaryOpNode("!",n);}
+	| "*" n=term(){return new DereferenceNode(n);}
+	| "&" n=term(){return new AddressNode(n);}
+	| LOOKAHEAD(3) <SIZEOF> "(" t=type() ")" //sizeof(类型)
+		{return new SizeofTypeNode(t,size_t());}
+	| <SIZEOF> n=unary()    //sizeof(表达式)
+		{return new SizeofExprNode(n,size_t()); }
+	| n=postfix(){return n;}
+}
+//后置运算符语法
+ExprNode postfix():
+{
+	ExprNode exp,idx;
+	String memb;
+	List<ExprNode>args;//参数列表
+	
+}
+{
+	exp=primary()
+	("--"
+		{exp= new SuffixOpNode("--",exp);}
+	|"++"
+		{exp= new SuffixOpNode("++",exp);}
+	|"["idx=expr()"]"      //数组引用
+		{ exp= new ArefNode(exp,idx);}
+	| "." memb=name()      //结构体或联合体引用
+		{ exp=new MemberNode(exp,memb);}
+	| "->" memb=name()   
+		{exp=new PtrMemberNode(exp,memb);}
+	| "(" args=args() ")"   //例如func(a,b)函数调用
+		{ exp= new FunCallNode(exp,args);}
+	)*
+		{return exp;}
+}
+List<ExprNode > args()	:
+{
+	List<ExprNode > args=new ArrayList<ExprNode>();
+	ExprNode exp;
+}
+{
+ 	[exp=expr() { args.add(exp); }]
+ 	("," exp=expr() { args.add(exp); } 	  )*
+ 		{
+ 		  	return args;
+ 		 }
+}

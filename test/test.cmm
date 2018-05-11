@@ -1,0 +1,15 @@
+/*
+用来测试的文件
+*/
+import stdio;
+struct student{
+	int old;
+};
+int main(int argc,char** argv){
+	char[10] tmp;
+	int a;
+	struct student wl;
+	wl.old=1;
+	a=10;
+	return a;
+}
