@@ -29,7 +29,7 @@
 | parser | 解析器类 |
 | sysdep | 包含依赖于OS的代码的类(汇编器和链接器) |
 | sysdep.x86 | 包含依赖于OS和CPU代码的类(代码生成器) |
-| type | 表示cb的类型的类 |
+| type | 表.fc的类型的类 |
 | utils | 小的工具类 |
 
 一个大致的流程:
@@ -136,72 +136,72 @@ main(void)
 ```
 可以看出,词法分析能够解析出每个单词是标识符还是关键字还是空格还是整数字面量.接下来再看语法分析后输出的抽象语法树,每个源文件对应一个AST:
 ```
-<<AST>> (test/struct3.cb:1)
+<<AST>> (test/struct3.fc:1)
 variables:
 functions:
-    <<DefinedFunction>> (test/struct3.cb:7)
+    <<DefinedFunction>> (test/struct3.fc:7)
     name: "main"
     isPrivate: false
     params:
         parameters:
     body:
-        <<BlockNode>> (test/struct3.cb:9)
+        <<BlockNode>> (test/struct3.fc:9)
         variables:
-            <<DefinedVariable>> (test/struct3.cb:10)
+            <<DefinedVariable>> (test/struct3.fc:10)
             name: "s"
             isPrivate: false
             typeNode: struct st
             initializer: null
         stmts:
-            <<ExprStmtNode>> (test/struct3.cb:11)
+            <<ExprStmtNode>> (test/struct3.fc:11)
             expr:
-                <<AssignNode>> (test/struct3.cb:11)
+                <<AssignNode>> (test/struct3.fc:11)
                 lhs:
-                    <<ArefNode>> (test/struct3.cb:11)
+                    <<ArefNode>> (test/struct3.fc:11)
                     expr:
-                        <<MemberNode>> (test/struct3.cb:11)
+                        <<MemberNode>> (test/struct3.fc:11)
                         expr:
-                            <<VariableNode>> (test/struct3.cb:11)
+                            <<VariableNode>> (test/struct3.fc:11)
                             name: "s"
                         member: "x"
                     index:
-                        <<IntegerLiteralNode>> (test/struct3.cb:11)
+                        <<IntegerLiteralNode>> (test/struct3.fc:11)
                         typeNode: int
                         value: 1
                 rhs:
-                    <<IntegerLiteralNode>> (test/struct3.cb:11)
+                    <<IntegerLiteralNode>> (test/struct3.fc:11)
                     typeNode: int
                     value: 7
-            <<ExprStmtNode>> (test/struct3.cb:12)
+            <<ExprStmtNode>> (test/struct3.fc:12)
             expr:
-                <<FuncallNode>> (test/struct3.cb:12)
+                <<FuncallNode>> (test/struct3.fc:12)
                 expr:
-                    <<VariableNode>> (test/struct3.cb:12)
+                    <<VariableNode>> (test/struct3.fc:12)
                     name: "printf"
                 args:
-                    <<StringLiteralNode>> (test/struct3.cb:12)
+                    <<StringLiteralNode>> (test/struct3.fc:12)
                     value: "%d\n"
-                    <<ArefNode>> (test/struct3.cb:12)
+                    <<ArefNode>> (test/struct3.fc:12)
                     expr:
-                        <<MemberNode>> (test/struct3.cb:12)
+                        <<MemberNode>> (test/struct3.fc:12)
                         expr:
-                            <<VariableNode>> (test/struct3.cb:12)
+                            <<VariableNode>> (test/struct3.fc:12)
                             name: "s"
                         member: "x"
                     index:
-                        <<IntegerLiteralNode>> (test/struct3.cb:12)
+                        <<IntegerLiteralNode>> (test/struct3.fc:12)
                         typeNode: int
                         value: 1
-            <<ReturnNode>> (test/struct3.cb:13)
+            <<ReturnNode>> (test/struct3.fc:13)
             expr:
-                <<IntegerLiteralNode>> (test/struct3.cb:13)
+                <<IntegerLiteralNode>> (test/struct3.fc:13)
                 typeNode: int
                 value: 0
 ```
 树中每个节点的定义需要自己完成,从根节点到最后的叶子节点总共有4层继承关系.
 汇编代码结构:
 ```
-.file	"test/struct3.cb"
+.file	"test/struct3.fc"
 	.section	.rodata
 .LC0:
 	.string	"%d\n"
@@ -250,8 +250,10 @@ main:
 
 ## 参考资料
 [龙书](https://book.douban.com/subject/3296317/)
+
 [编译器设计](https://book.douban.com/subject/20436488/)
+
 [自制编译器](https://book.douban.com/subject/26806041/)
 
-												*持续更新 2018.5.12*
+												_*持续更新 2018.5.12*_
 
