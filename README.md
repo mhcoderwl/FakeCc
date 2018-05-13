@@ -41,7 +41,7 @@
 
 ## 实现功能
 可以打印出前端后端解析每一步的结果,比如说需要打印词法解析后每一个单词(源代码中是一个token类)的情况,可以在运行时添加参数 --print-tokens,还可以打印抽象语法树,中间代码树,汇编代码等.比如说用test文件下内的测试文件struct:
-```
+`
 import stdio;
 
 struct st {
@@ -57,10 +57,10 @@ main(void)
     return 0;
 }
 
-```
+`
 
 词法分析后的结果:
-```
+`
 "import"                "import"
 <SPACES>                " "
 <IDENTIFIER>            "stdio"
@@ -133,9 +133,9 @@ main(void)
 "}"                     "}"
 <SPACES>                "\n"
 <EOF>                   ""
-```
+`
 可以看出,词法分析能够解析出每个单词是标识符还是关键字还是空格还是整数字面量.接下来再看语法分析后输出的抽象语法树,每个源文件对应一个AST:
-```
+`
 <<AST>> (test/struct3.cb:1)
 variables:
 functions:
@@ -197,10 +197,10 @@ functions:
                 <<IntegerLiteralNode>> (test/struct3.cb:13)
                 typeNode: int
                 value: 0
-```
+`
 树中每个节点的定义需要自己完成,从根节点到最后的叶子节点总共有4层继承关系.
 汇编代码结构:
-```
+`
 .file	"test/struct3.cb"
 	.section	.rodata
 .LC0:
@@ -242,11 +242,16 @@ main:
 	popl	%ebp
 	ret
 	.size	main,.-main
-```
-其中带.的标签是汇编伪操作,由汇编器执行而不是cpu,相当于ide中的预编译.转成汇编代码后由工具__as命令__来完成链接成目标文件.
+`
+其中带.的标签是汇编伪操作,由汇编器执行而不是cpu,相当于ide中的预编译.转成汇编代码后由工具**as命令**来完成链接成目标文件.
 
-##
+## 程序入口
 主入口在compiler包中的Compiler类,可以通过--print-help查看所有的参数选项.
 
-						_持续更新 2018.5.12_
+## 参考资料
+[龙书](https://book.douban.com/subject/3296317/)
+[编译器设计](https://book.douban.com/subject/20436488/)
+[自制编译器](https://book.douban.com/subject/26806041/)
+
+												*持续更新 2018.5.12*
 
